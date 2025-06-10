@@ -28,7 +28,7 @@ def bbox_iou(box1, box2):
         return 0
     return inter_area / union_area
 
-def load_yolo_labels(label_file):
+def load_yolo_labels(label_file, with_conf=False):
     boxes = []
     with open(label_file, 'r') as f:
         for line in f:
@@ -37,8 +37,13 @@ def load_yolo_labels(label_file):
                 continue
             cls_id = int(items[0])
             box = list(map(float, items[1:5]))
-            boxes.append((cls_id, box))
+            if with_conf and len(items) >= 6:
+                conf = float(items[5])
+                boxes.append((cls_id, box, conf))
+            else:
+                boxes.append((cls_id, box))
     return boxes
+
 
 def compute_ap(recall, precision):
     recall = np.concatenate(([0.], recall, [1.]))
@@ -60,16 +65,17 @@ def calculate_map(gt_folder, pred_folder, iou_threshold=0.5, num_classes=80):
     for gt_file in gt_files:
         filename = os.path.basename(gt_file)
         pred_file = os.path.join(pred_folder, filename)
-        gt_boxes = load_yolo_labels(gt_file)
-        pred_boxes = load_yolo_labels(pred_file) if os.path.exists(pred_file) else []
+        gt_boxes = load_yolo_labels(gt_file, with_conf=False)
+        pred_boxes = load_yolo_labels(pred_file, with_conf=True)
 
         used = []
         for cls_id, box in gt_boxes:
             all_gt[cls_id].append({'file': filename, 'box': box, 'used': False})
             gt_counter_per_class[cls_id] += 1
 
-        for cls_id, box in pred_boxes:
-            all_pred[cls_id].append({'file': filename, 'box': box, 'conf': 1.0})  # conf=1.0 as not included in txt
+        
+        for cls_id, box, conf in pred_boxes:
+            all_pred[cls_id].append({'file': filename, 'box': box, 'conf': conf})
 
     ap_per_class = []
     for cls in range(num_classes):

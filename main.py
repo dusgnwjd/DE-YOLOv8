@@ -1,21 +1,72 @@
-import ultralytics
 from ultralytics import YOLO
 import torch.nn as nn
+import torchvision.models as models
+import torch
+from dynamic_erasing import DynamicErasing
+from ultralytics import YOLO
+import random
+import numpy as np
+from align_face import align_face
+import cv2
+import os
 
-yolo = YOLO('yolov8s.pt')
 
-# backbone, neck, head를 직접 수정하려면 PyTorch 수준에서 접근해야 함
-model = yolo.model  # 실제 nn.Module 객체
+def seed_everything(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
-# 3. 마지막 레이어(head) 수정 -> Fine tuning 예시.
-model.model[-1] = nn.Sequential(
-    nn.Conv2d(1024, 1024, kernel_size=1),
-    nn.ReLU(),
-    model.model[-1]  # 원래 head
-)
+    # CuDNN의 비결정성 방지
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+def preprocess_align_images(image_dir):
+    print(f"📐 얼굴 정렬 중: {image_dir}")
+    image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith('.jpg') or f.endswith('.png')]
+    for img_path in image_paths:
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+        aligned = align_face(img)
+        cv2.imwrite(img_path, aligned)
+    print(f"✅ 얼굴 정렬 완료")
 
-# 4. 수정한 모델을 다시 YOLO 객체에 넣기
-yolo.model = model
+def main():
+    preprocess_align_images("data/train/images")
+    preprocess_align_images("data/valid/images")
+    preprocess_align_images("data/test/images")
+    yolo = YOLO('yolov8s.yaml')  # 구조만 불러오기
+    seed_everything(42)
+    model = yolo.model
+    # backbone = model.model[0], neck = model.model[1], head = model.model[2]
+    # 🔁 backbone + dynamic erase + neck + head
+    backbone = model.model[0]
+    neck = model.model[1]
+    head = model.model[2]
 
-# 5. 학습 시작 (Ultralytics API 사용 가능)
-yolo.train(data='data.yaml', epochs=10, batch=64, imgsz=416) # epoch 조절하면서 할것.
+    # 🔧 new model with dynamic erasing after backbone
+    new_model = nn.Sequential(
+        backbone,
+        #DynamicErasing(erase_prob=0.5, erase_ratio=0.2),
+        neck,
+        head
+    )
+
+    yolo.model.model = new_model
+    yolo.model.nc = 1
+    yolo.model.names = ['face']
+
+    yolo.train(
+        data='data.yaml',
+        epochs=70,
+        imgsz=416,
+        batch=64,
+        seed=42,
+        save_conf=True
+    )
+
+if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
+    main()
