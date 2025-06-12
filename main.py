@@ -48,7 +48,7 @@ def main():
     # 🔧 new model with dynamic erasing after backbone
     new_model = nn.Sequential(
         backbone,
-        #DynamicErasing(erase_prob=0.5, erase_ratio=0.2),
+        DynamicErasing(erase_prob=0.5, erase_ratio=0.2),
         neck,
         head
     )
@@ -68,5 +68,6 @@ def main():
 
 if __name__ == '__main__':
     import multiprocessing
+    seed_everything(42)
     multiprocessing.freeze_support()
     main()
